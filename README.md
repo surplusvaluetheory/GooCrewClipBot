@@ -148,6 +148,8 @@ MIT License
 
 - Built with [twitchAPI](https://github.com/Teekeks/pyTwitchAPI)
 - Inspired by [libtron](https://twitch.tv/libtron) and the rest of the [Goo Crew community](https://www.twitch.tv/team/goocrew)
+- Vibe coded with modified Claude 3.7 Sonnet model
+- running on a Raspberry Pi 5 Model B Rev 1.0 8GB
 
 ---
 
