@@ -32,7 +32,7 @@ A Twitch bot that automatically creates clips when chat reactions reach a thresh
    pip install -r requirements.txt
    ```
 
-3. Create a `.env` file with your configuration:
+3. Create a `.env` file with your configuration or rename `sample.env` to `.env`:
    ```
    TWITCH_CLIENT_ID=your_client_id
    TWITCH_CLIENT_SECRET=your_client_secret
