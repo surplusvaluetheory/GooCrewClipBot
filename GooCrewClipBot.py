@@ -149,19 +149,20 @@ async def check_token_validity():
                             if 'scopes' in data:
                                 logger.info(f"Token scopes: {', '.join(data['scopes'])}")
 
-                            return True
+                            # Return both validity and expiration time
+                            return True, expires_in_seconds
                         else:
                             logger.info("Token is valid, but couldn't determine expiration time")
-                            return True
+                            return True, None
                     else:
                         logger.error(f"Failed to validate token: {response.status}")
-                        return False
+                        return False, None
 
         await temp_twitch.close()
-        return False
+        return False, None
     except Exception as e:
         logger.error(f"Error checking token validity: {str(e)}")
-        return False
+        return False, None
 
 async def refresh_with_twitchtokengenerator():
     """Refresh the token using TwitchTokenGenerator's refresh API"""
@@ -603,7 +604,21 @@ async def main():
 
     # Check token validity and expiration
     logger.info("Checking token validity...")
-    token_valid = await check_token_validity()
+    token_valid, expires_in_seconds = await check_token_validity()
+
+    # If token is valid but expires soon (less than 3 hours), refresh it immediately
+    if token_valid and expires_in_seconds is not None and expires_in_seconds < 10800:  # 10800 seconds = 3 hours
+        logger.info(f"Token expires in {expires_in_seconds} seconds (less than 3 hours), refreshing immediately...")
+        twitch_api_success = await refresh_with_twitch_api()
+
+        if not twitch_api_success:
+            logger.warning("Direct Twitch API refresh failed, trying TwitchTokenGenerator")
+            await refresh_with_twitchtokengenerator()
+
+        # Verify the token was refreshed successfully
+        token_valid, _ = await check_token_validity()
+
+    # If token is not valid, try to refresh it
     if not token_valid:
         logger.warning("Token validation failed, attempting direct refresh with Twitch API...")
         twitch_api_success = await refresh_with_twitch_api()
@@ -619,7 +634,7 @@ async def main():
                 return
 
         # Check validity again after refresh
-        token_valid = await check_token_validity()
+        token_valid, _ = await check_token_validity()
         if not token_valid:
             logger.error("Token still invalid after refresh. Please check your credentials.")
             print_token_renewal_instructions()
