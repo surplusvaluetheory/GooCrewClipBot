@@ -200,7 +200,7 @@ async def refresh_with_twitchtokengenerator():
                                 await twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
 
                             logger.info(f"Token refreshed with TwitchTokenGenerator at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                            logger.info("Token refresh successful - 60 day validity countdown reset")
+                            logger.info("Access token refreshed and refresh token updated with TwitchTokenGenerator")
                             return True
                         else:
                             logger.error("Failed to extract new tokens from TwitchTokenGenerator response")
@@ -254,6 +254,7 @@ async def refresh_with_twitch_api():
                             await twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
 
                         logger.info(f"Token refreshed directly with Twitch API at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        logger.info("Access token refreshed and refresh token updated with Twitch API")
                         return True
                     else:
                         logger.error("Failed to get new tokens from Twitch API response")
@@ -296,22 +297,7 @@ async def scheduled_token_refresh():
 
             current_time = datetime.now()
 
-            # Check if it's been more than 30 days since our last TwitchTokenGenerator refresh
-            # This ensures we refresh the token with TTG at least every 30 days to reset the 60-day countdown
-            days_since_ttg_refresh = (current_time - last_ttg_refresh).days
-            if days_since_ttg_refresh >= 30:
-                logger.info(f"It's been {days_since_ttg_refresh} days since the last TwitchTokenGenerator refresh")
-                logger.info("Performing scheduled refresh with TwitchTokenGenerator to reset 60-day countdown")
-                ttg_success = await refresh_with_twitchtokengenerator()
-
-                # If TTG fails, try direct Twitch API refresh
-                if not ttg_success:
-                    logger.warning("TwitchTokenGenerator refresh failed, trying direct Twitch API refresh")
-                    await refresh_with_twitch_api()
-
-                continue  # Skip the rest of this iteration since we just refreshed
-
-            # If we're not due for a TTG refresh, check if the access token is close to expiring
+            # Check if the access token is close to expiring
             headers = {
                 'Authorization': f'OAuth {ACCESS_TOKEN}'
             }
@@ -328,37 +314,48 @@ async def scheduled_token_refresh():
                             # If less than 2 hours left, refresh the token
                             if expires_in_seconds < 7200:  # 7200 seconds = 2 hours
                                 logger.info(f"Token expires in {expires_in_seconds} seconds, refreshing...")
-                                # Use the built-in refresh mechanism for regular refreshes
-                                # This will trigger the token_refresh_callback
-                                try:
-                                    await twitch.refresh_used_token()
-                                    logger.info("Token refreshed using built-in mechanism")
-                                except Exception as e:
-                                    logger.error(f"Built-in token refresh failed: {str(e)}")
-                                    # Try TTG first
-                                    ttg_success = await refresh_with_twitchtokengenerator()
-                                    # If TTG fails, try direct Twitch API refresh
-                                    if not ttg_success:
-                                        await refresh_with_twitch_api()
+                                # Try direct Twitch API refresh first
+                                twitch_api_success = await refresh_with_twitch_api()
+
+                                # If direct refresh fails, try TwitchTokenGenerator as fallback
+                                if not twitch_api_success:
+                                    logger.warning("Direct Twitch API refresh failed, trying TwitchTokenGenerator")
+                                    await refresh_with_twitchtokengenerator()
                             else:
                                 logger.info(f"Token still valid for {expires_in_seconds//3600} hours, no refresh needed")
                     else:
-                        # If validation fails, try to refresh with TTG first
-                        logger.warning(f"Token validation failed, attempting refresh with TwitchTokenGenerator...")
-                        ttg_success = await refresh_with_twitchtokengenerator()
+                        # If validation fails, try direct Twitch API refresh first
+                        logger.warning(f"Token validation failed, attempting direct refresh with Twitch API...")
+                        twitch_api_success = await refresh_with_twitch_api()
 
-                        # If TTG fails, try direct Twitch API refresh
-                        if not ttg_success:
-                            logger.warning("TwitchTokenGenerator refresh failed, trying direct Twitch API refresh")
-                            await refresh_with_twitch_api()
+                        # If direct refresh fails, try TwitchTokenGenerator as fallback
+                        if not twitch_api_success:
+                            logger.warning("Direct Twitch API refresh failed, trying TwitchTokenGenerator")
+                            await refresh_with_twitchtokengenerator()
+
+            # Check if it's been more than 30 days since our last refresh token update
+            # This ensures we refresh the token at least every 30 days to reset the 60-day countdown
+            days_since_last_refresh = (current_time - last_token_refresh).days
+            if days_since_last_refresh >= 30:
+                logger.info(f"It's been {days_since_last_refresh} days since the last token refresh")
+                logger.info("Performing scheduled refresh to reset 60-day countdown")
+                # Try direct Twitch API refresh first
+                twitch_api_success = await refresh_with_twitch_api()
+
+                # If direct refresh fails, try TwitchTokenGenerator as fallback
+                if not twitch_api_success:
+                    logger.warning("Direct Twitch API refresh failed, trying TwitchTokenGenerator")
+                    await refresh_with_twitchtokengenerator()
+
         except Exception as e:
             logger.error(f"Error in scheduled token refresh: {str(e)}")
-            # Try to refresh with TTG if there was an error
+            # Try to refresh with direct Twitch API if there was an error
             try:
-                ttg_success = await refresh_with_twitchtokengenerator()
-                # If TTG fails, try direct Twitch API refresh
-                if not ttg_success:
-                    await refresh_with_twitch_api()
+                twitch_api_success = await refresh_with_twitch_api()
+                # If direct refresh fails, try TwitchTokenGenerator as fallback
+                if not twitch_api_success:
+                    logger.warning("Direct Twitch API refresh failed, trying TwitchTokenGenerator")
+                    await refresh_with_twitchtokengenerator()
             except Exception as inner_e:
                 logger.error(f"Failed to refresh token after error: {str(inner_e)}")
 
@@ -608,15 +605,15 @@ async def main():
     logger.info("Checking token validity...")
     token_valid = await check_token_validity()
     if not token_valid:
-        logger.warning("Token validation failed, attempting to refresh token with TwitchTokenGenerator...")
-        ttg_success = await refresh_with_twitchtokengenerator()
+        logger.warning("Token validation failed, attempting direct refresh with Twitch API...")
+        twitch_api_success = await refresh_with_twitch_api()
 
-        # If TTG fails, try direct Twitch API refresh
-        if not ttg_success:
-            logger.warning("TwitchTokenGenerator refresh failed, trying direct Twitch API refresh")
-            twitch_api_success = await refresh_with_twitch_api()
+        # If direct refresh fails, try TwitchTokenGenerator as fallback
+        if not twitch_api_success:
+            logger.warning("Direct Twitch API refresh failed, trying TwitchTokenGenerator")
+            ttg_success = await refresh_with_twitchtokengenerator()
 
-            if not twitch_api_success:
+            if not ttg_success:
                 logger.error("All token refresh methods failed.")
                 print_token_renewal_instructions()
                 return
