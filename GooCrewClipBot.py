@@ -79,6 +79,37 @@ for channel in SILENT_CHANNELS:
 # Global variables
 twitch = None
 chat = None
+last_token_refresh = datetime.now()
+# Track when the refresh token was last used with TwitchTokenGenerator
+# Initialize with a date 30 days ago to ensure we refresh within 30 days
+last_ttg_refresh = datetime.now() - timedelta(days=30)
+
+def update_env_file(access_token, refresh_token):
+    """Update the .env file with new tokens"""
+    try:
+        # Read the current .env file
+        with open('.env', 'r') as f:
+            lines = f.readlines()
+
+        # Update the token lines
+        new_lines = []
+        for line in lines:
+            if line.startswith('TWITCH_ACCESS_TOKEN='):
+                new_lines.append(f'TWITCH_ACCESS_TOKEN={access_token}\n')
+            elif line.startswith('TWITCH_REFRESH_TOKEN='):
+                new_lines.append(f'TWITCH_REFRESH_TOKEN={refresh_token}\n')
+            else:
+                new_lines.append(line)
+
+        # Write the updated content back to the .env file
+        with open('.env', 'w') as f:
+            f.writelines(new_lines)
+
+        logger.info("Updated .env file with new tokens")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update .env file: {str(e)}")
+        return False
 
 async def check_token_validity():
     """Check if the provided tokens are valid and get expiration info"""
@@ -131,6 +162,205 @@ async def check_token_validity():
     except Exception as e:
         logger.error(f"Error checking token validity: {str(e)}")
         return False
+
+async def refresh_with_twitchtokengenerator():
+    """Refresh the token using TwitchTokenGenerator's refresh API"""
+    global ACCESS_TOKEN, REFRESH_TOKEN, last_token_refresh, last_ttg_refresh
+
+    try:
+        logger.info("Refreshing token using TwitchTokenGenerator...")
+
+        # Use TwitchTokenGenerator's refresh API
+        refresh_url = f"https://twitchtokengenerator.com/api/refresh/{REFRESH_TOKEN}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(refresh_url) as response:
+                if response.status == 200:
+                    result = await response.json()
+
+                    # Check if the refresh was successful
+                    if result.get('success') == True:
+                        # Extract the new tokens
+                        token_data = result.get('token', {})
+                        new_access_token = token_data.get('access_token')
+                        new_refresh_token = token_data.get('refresh_token')
+
+                        if new_access_token and new_refresh_token:
+                            # Update global variables
+                            ACCESS_TOKEN = new_access_token
+                            REFRESH_TOKEN = new_refresh_token
+                            last_token_refresh = datetime.now()
+                            last_ttg_refresh = datetime.now()  # Update the TTG refresh timestamp
+
+                            # Update the .env file
+                            update_env_file(new_access_token, new_refresh_token)
+
+                            # Update the twitch instance with the new tokens
+                            if twitch:  # Only if twitch instance exists
+                                await twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
+
+                            logger.info(f"Token refreshed with TwitchTokenGenerator at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                            logger.info("Token refresh successful - 60 day validity countdown reset")
+                            return True
+                        else:
+                            logger.error("Failed to extract new tokens from TwitchTokenGenerator response")
+                    else:
+                        error_msg = result.get('message', 'Unknown error')
+                        logger.error(f"TwitchTokenGenerator refresh failed: {error_msg}")
+                else:
+                    error_text = await response.text()
+                    logger.error(f"TwitchTokenGenerator refresh failed: {response.status} - {error_text}")
+
+                return False
+    except Exception as e:
+        logger.error(f"Error refreshing token with TwitchTokenGenerator: {str(e)}")
+        return False
+
+async def refresh_with_twitch_api():
+    """Refresh the token directly using Twitch's OAuth API"""
+    global ACCESS_TOKEN, REFRESH_TOKEN, last_token_refresh
+
+    try:
+        logger.info("Attempting to refresh token directly with Twitch API...")
+
+        # Use the Twitch OAuth API to refresh the token
+        async with aiohttp.ClientSession() as session:
+            data = {
+                'client_id': APP_ID,
+                'client_secret': APP_SECRET,
+                'grant_type': 'refresh_token',
+                'refresh_token': REFRESH_TOKEN
+            }
+
+            async with session.post('https://id.twitch.tv/oauth2/token', data=data) as response:
+                if response.status == 200:
+                    result = await response.json()
+
+                    # Update the tokens
+                    new_access_token = result.get('access_token')
+                    new_refresh_token = result.get('refresh_token')
+
+                    if new_access_token and new_refresh_token:
+                        # Update global variables
+                        ACCESS_TOKEN = new_access_token
+                        REFRESH_TOKEN = new_refresh_token
+                        last_token_refresh = datetime.now()
+
+                        # Update the .env file
+                        update_env_file(new_access_token, new_refresh_token)
+
+                        # Update the twitch instance with the new tokens
+                        if twitch:  # Only if twitch instance exists
+                            await twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
+
+                        logger.info(f"Token refreshed directly with Twitch API at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        return True
+                    else:
+                        logger.error("Failed to get new tokens from Twitch API response")
+                        return False
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Twitch API token refresh failed: {response.status} - {error_text}")
+                    return False
+    except Exception as e:
+        logger.error(f"Error refreshing token with Twitch API: {str(e)}")
+        return False
+
+def print_token_renewal_instructions():
+    """Print instructions for manually renewing tokens"""
+    logger.error("===== TOKEN RENEWAL REQUIRED =====")
+    logger.error("Your Twitch tokens have expired and automatic refresh failed.")
+    logger.error("Please follow these steps to generate new tokens:")
+    logger.error("")
+    logger.error("1. Visit https://twitchtokengenerator.com/")
+    logger.error("2. Select 'Custom Scope Token'")
+    logger.error("3. Enter your Client ID and Client Secret")
+    logger.error("4. Select the following scopes:")
+    logger.error("   - chat:read")
+    logger.error("   - chat:edit")
+    logger.error("   - clips:edit")
+    logger.error("   - channel:read:subscriptions")
+    logger.error("5. Generate the token")
+    logger.error("6. Copy the Access Token and Refresh Token")
+    logger.error("7. Update your .env file with the new tokens")
+    logger.error("")
+    logger.error("After updating the .env file, restart the bot.")
+    logger.error("=====================================")
+
+async def scheduled_token_refresh():
+    """Periodically refresh the token to ensure it never expires"""
+    while True:
+        try:
+            # Wait for 1 hour between checks
+            await asyncio.sleep(3600)  # 3600 seconds = 1 hour
+
+            current_time = datetime.now()
+
+            # Check if it's been more than 30 days since our last TwitchTokenGenerator refresh
+            # This ensures we refresh the token with TTG at least every 30 days to reset the 60-day countdown
+            days_since_ttg_refresh = (current_time - last_ttg_refresh).days
+            if days_since_ttg_refresh >= 30:
+                logger.info(f"It's been {days_since_ttg_refresh} days since the last TwitchTokenGenerator refresh")
+                logger.info("Performing scheduled refresh with TwitchTokenGenerator to reset 60-day countdown")
+                ttg_success = await refresh_with_twitchtokengenerator()
+
+                # If TTG fails, try direct Twitch API refresh
+                if not ttg_success:
+                    logger.warning("TwitchTokenGenerator refresh failed, trying direct Twitch API refresh")
+                    await refresh_with_twitch_api()
+
+                continue  # Skip the rest of this iteration since we just refreshed
+
+            # If we're not due for a TTG refresh, check if the access token is close to expiring
+            headers = {
+                'Authorization': f'OAuth {ACCESS_TOKEN}'
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get('https://id.twitch.tv/oauth2/validate', headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # Extract expiration info
+                        if 'expires_in' in data:
+                            expires_in_seconds = data['expires_in']
+
+                            # If less than 2 hours left, refresh the token
+                            if expires_in_seconds < 7200:  # 7200 seconds = 2 hours
+                                logger.info(f"Token expires in {expires_in_seconds} seconds, refreshing...")
+                                # Use the built-in refresh mechanism for regular refreshes
+                                # This will trigger the token_refresh_callback
+                                try:
+                                    await twitch.refresh_used_token()
+                                    logger.info("Token refreshed using built-in mechanism")
+                                except Exception as e:
+                                    logger.error(f"Built-in token refresh failed: {str(e)}")
+                                    # Try TTG first
+                                    ttg_success = await refresh_with_twitchtokengenerator()
+                                    # If TTG fails, try direct Twitch API refresh
+                                    if not ttg_success:
+                                        await refresh_with_twitch_api()
+                            else:
+                                logger.info(f"Token still valid for {expires_in_seconds//3600} hours, no refresh needed")
+                    else:
+                        # If validation fails, try to refresh with TTG first
+                        logger.warning(f"Token validation failed, attempting refresh with TwitchTokenGenerator...")
+                        ttg_success = await refresh_with_twitchtokengenerator()
+
+                        # If TTG fails, try direct Twitch API refresh
+                        if not ttg_success:
+                            logger.warning("TwitchTokenGenerator refresh failed, trying direct Twitch API refresh")
+                            await refresh_with_twitch_api()
+        except Exception as e:
+            logger.error(f"Error in scheduled token refresh: {str(e)}")
+            # Try to refresh with TTG if there was an error
+            try:
+                ttg_success = await refresh_with_twitchtokengenerator()
+                # If TTG fails, try direct Twitch API refresh
+                if not ttg_success:
+                    await refresh_with_twitch_api()
+            except Exception as inner_e:
+                logger.error(f"Failed to refresh token after error: {str(inner_e)}")
 
 async def on_ready(ready_event: EventData):
     logger.info(f'Bot is ready!')
@@ -378,17 +608,41 @@ async def main():
     logger.info("Checking token validity...")
     token_valid = await check_token_validity()
     if not token_valid:
-        logger.error("Token validation failed. Please check your credentials.")
-        return
+        logger.warning("Token validation failed, attempting to refresh token with TwitchTokenGenerator...")
+        ttg_success = await refresh_with_twitchtokengenerator()
+
+        # If TTG fails, try direct Twitch API refresh
+        if not ttg_success:
+            logger.warning("TwitchTokenGenerator refresh failed, trying direct Twitch API refresh")
+            twitch_api_success = await refresh_with_twitch_api()
+
+            if not twitch_api_success:
+                logger.error("All token refresh methods failed.")
+                print_token_renewal_instructions()
+                return
+
+        # Check validity again after refresh
+        token_valid = await check_token_validity()
+        if not token_valid:
+            logger.error("Token still invalid after refresh. Please check your credentials.")
+            print_token_renewal_instructions()
+            return
 
     # Initialize Twitch API with client ID and secret
     twitch = await Twitch(APP_ID, APP_SECRET)
 
     # Define a token refresh callback
     async def token_refresh_callback(token, refresh_token):
-        logger.info(f"Token refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        # Optionally update the .env file with the new tokens
-        # This is useful if you want to persist the new tokens
+        global ACCESS_TOKEN, REFRESH_TOKEN, last_token_refresh
+        logger.info(f"Token refreshed by Twitch API at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Update global variables
+        ACCESS_TOKEN = token
+        REFRESH_TOKEN = refresh_token
+        last_token_refresh = datetime.now()
+
+        # Update the .env file with the new tokens
+        update_env_file(token, refresh_token)
 
     # Set the token refresh callback
     twitch.token_refresh_callback = token_refresh_callback
@@ -406,9 +660,11 @@ async def main():
             logger.info(f"Authenticated as: {user.display_name}")
         else:
             logger.error("Authentication failed: Could not retrieve user information")
+            print_token_renewal_instructions()
             return
     except Exception as e:
         logger.error(f"Authentication failed: {str(e)}")
+        print_token_renewal_instructions()
         return
 
     # Initialize chat connection
@@ -421,6 +677,9 @@ async def main():
     # Register the silence command
     chat.register_command('silence', silence_command)
 
+    # Start the scheduled token refresh task
+    refresh_task = asyncio.create_task(scheduled_token_refresh())
+
     # Start the bot
     chat.start()
 
@@ -431,6 +690,13 @@ async def main():
     except KeyboardInterrupt:
         logger.info("Bot shutting down...")
     finally:
+        # Cancel the refresh task
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
+
         chat.stop()
         await twitch.close()
 
