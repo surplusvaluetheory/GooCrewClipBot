@@ -49,13 +49,30 @@ A Twitch bot that automatically creates clips when chat reactions reach a thresh
    REACTION_WINDOW=30
    REACTION_THRESHOLD=10
    COOLDOWN_PERIOD=120
-   
    ```
 
 4. Run the bot:
+   
    ```bash
    python GooCrewClipBot.py
    ```
+
+## Creating a Twitch Application
+
+Before using TwitchTokenGenerator, you need to register an application in the Twitch Developer Portal:
+
+1. Go to [Twitch Developer Console](https://dev.twitch.tv/console/apps)
+2. Log in with your Twitch account
+3. Click "Register Your Application"
+4. Fill in the required fields:
+   - **Name**: Choose a name for your application (e.g., "GooCrewClipBot")
+   - **OAuth Redirect URLs**: Enter `https://twitchtokengenerator.com` 
+   - **Category**: Select "Chat Bot" or "Other"
+5. Click "Create"
+6. On the next screen, click "Manage" next to your new application
+7. Note your **Client ID**
+8. Click "New Secret" to generate a **Client Secret**
+9. Copy both the Client ID and Client Secret for use with TwitchTokenGenerator
 
 ## Authentication with TwitchTokenGenerator
 
