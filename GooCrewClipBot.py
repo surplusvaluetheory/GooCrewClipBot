@@ -6,7 +6,6 @@ import asyncio
 import json
 import aiohttp
 from twitchAPI.twitch import Twitch
-from twitchAPI.oauth import UserAuthenticator, refresh_access_token
 # Updated imports for newer twitchAPI versions
 from twitchAPI.type import AuthScope, ChatEvent
 from twitchAPI.chat import Chat, EventData, ChatMessage
@@ -26,8 +25,12 @@ logger = logging.getLogger('GooCrewClipBot')
 
 # Load environment variables
 load_dotenv()
+# Get credentials from environment
 APP_ID = os.getenv('TWITCH_CLIENT_ID')
-APP_SECRET = os.getenv('TWITCH_CLIENT_SECRET')
+APP_SECRET = os.getenv('TWITCH_CLIENT_SECRET')  # We need this for the API initialization
+ACCESS_TOKEN = os.getenv('TWITCH_ACCESS_TOKEN')
+REFRESH_TOKEN = os.getenv('TWITCH_REFRESH_TOKEN')
+
 USER_SCOPE = [
     AuthScope.CHAT_READ,
     AuthScope.CLIPS_EDIT,
@@ -53,9 +56,6 @@ ALL_CHANNELS = list(set(CHANNELS + SILENT_CHANNELS))
 REACTION_KEYWORDS = [keyword.strip().lower() for keyword in os.getenv('REACTION_KEYWORDS', 'lol,lmao,+2,lmfao').split(',')]
 logger.info(f"Monitoring for reaction keywords: {', '.join(REACTION_KEYWORDS)}")
 
-# Token file path
-TOKEN_FILE = "twitch_tokens.json"
-
 # Reaction tracking settings
 REACTION_WINDOW = int(os.getenv('REACTION_WINDOW', '30'))  # seconds to count reactions
 REACTION_THRESHOLD = int(os.getenv('REACTION_THRESHOLD', '10'))  # number of reactions needed to trigger a clip
@@ -80,52 +80,57 @@ for channel in SILENT_CHANNELS:
 twitch = None
 chat = None
 
-async def validate_tokens():
-    """Check if we have valid tokens or need to authenticate"""
+async def check_token_validity():
+    """Check if the provided tokens are valid and get expiration info"""
     try:
-        # Check if token file exists
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, 'r') as f:
-                token_data = json.load(f)
+        # Initialize a temporary Twitch instance to validate tokens
+        temp_twitch = await Twitch(APP_ID, APP_SECRET)
+        temp_twitch.auto_refresh_auth = False  # Disable auto refresh
 
-            # Check if tokens exist and aren't expired
-            if 'access_token' in token_data and 'refresh_token' in token_data and 'expires_at' in token_data:
-                # Check if token is expired or about to expire (within 1 hour)
-                expires_at = datetime.fromtimestamp(token_data['expires_at'])
-                if expires_at > datetime.now() + timedelta(hours=1):
-                    logger.info("Existing tokens are valid")
-                    return token_data['access_token'], token_data['refresh_token']
+        # Set the authentication with the tokens
+        await temp_twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
 
-                # Token is expired or about to expire, try to refresh
-                logger.info("Token expired or about to expire, refreshing...")
-                try:
-                    new_token_data = await refresh_access_token(
-                        token_data['refresh_token'], 
-                        APP_ID, 
-                        APP_SECRET
-                    )
+        # Try to make a simple API call to validate the token
+        user = await first(temp_twitch.get_users())
 
-                    # Save the new tokens
-                    with open(TOKEN_FILE, 'w') as f:
-                        json.dump({
-                            'access_token': new_token_data[0],
-                            'refresh_token': new_token_data[1],
-                            'expires_at': (datetime.now() + timedelta(seconds=new_token_data[2])).timestamp()
-                        }, f)
+        if user:
+            # Token is valid, now get expiration info
+            # We'll use the validate endpoint to get token info
+            headers = {
+                'Authorization': f'OAuth {ACCESS_TOKEN}'
+            }
 
-                    logger.info("Successfully refreshed token")
-                    return new_token_data[0], new_token_data[1]
-                except Exception as e:
-                    logger.error(f"Failed to refresh token: {str(e)}")
-                    # Fall through to new authentication
+            async with aiohttp.ClientSession() as session:
+                async with session.get('https://id.twitch.tv/oauth2/validate', headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
 
-        # If we get here, we need to do a fresh authentication
-        logger.info("No valid tokens found, starting new authentication")
-        return None, None
+                        # Extract expiration info
+                        if 'expires_in' in data:
+                            expires_in_seconds = data['expires_in']
+                            expiration_date = datetime.now() + timedelta(seconds=expires_in_seconds)
 
+                            # Format expiration date
+                            formatted_date = expiration_date.strftime('%Y-%m-%d %H:%M:%S')
+                            logger.info(f"Token is valid! Expires on: {formatted_date} (in {expires_in_seconds//86400} days, {(expires_in_seconds%86400)//3600} hours)")
+
+                            # Also log the scopes
+                            if 'scopes' in data:
+                                logger.info(f"Token scopes: {', '.join(data['scopes'])}")
+
+                            return True
+                        else:
+                            logger.info("Token is valid, but couldn't determine expiration time")
+                            return True
+                    else:
+                        logger.error(f"Failed to validate token: {response.status}")
+                        return False
+
+        await temp_twitch.close()
+        return False
     except Exception as e:
-        logger.error(f"Error validating tokens: {str(e)}")
-        return None, None
+        logger.error(f"Error checking token validity: {str(e)}")
+        return False
 
 async def on_ready(ready_event: EventData):
     logger.info(f'Bot is ready!')
@@ -340,45 +345,53 @@ async def create_clip_and_share(channel):
         logger.error(f"Error creating clip for channel {channel}: {str(e)}")
         return False
 
+async def silence_command(cmd):
+    channel = cmd.room.name.lower()
+    if channel in channel_states:
+        state = channel_states[channel]
+        was_silenced = state.silence_mode
+        state.silence_mode = True
+        logger.info(f"Silence mode activated for channel {channel} via command")
+
+        # Send a message that the bot will be silent
+        if not was_silenced:  # Only send if we weren't already silenced
+            try:
+                await chat.send_message(channel, "I'll be quiet until I'm restarted, but I'll still create clips!")
+            except Exception as e:
+                logger.error(f"Error sending silence message to {channel}: {str(e)}")
+
 async def main():
     global twitch, chat
 
     logger.info("Starting GooCrewClipBot...")
 
-    # Validate client ID and secret
+    # Validate credentials
     if not APP_ID or not APP_SECRET:
         logger.error("Missing Twitch Client ID or Client Secret. Please check your .env file.")
         return
 
-    # Check if we have valid tokens
-    access_token, refresh_token = await validate_tokens()
+    if not ACCESS_TOKEN or not REFRESH_TOKEN:
+        logger.error("Missing Twitch Access Token or Refresh Token. Please check your .env file.")
+        return
 
-    # Initialize Twitch API
+    # Check token validity and expiration
+    logger.info("Checking token validity...")
+    token_valid = await check_token_validity()
+    if not token_valid:
+        logger.error("Token validation failed. Please check your credentials.")
+        return
+
+    # Initialize Twitch API with client ID and secret
     twitch = await Twitch(APP_ID, APP_SECRET)
 
-    if access_token and refresh_token:
-        # Use existing tokens
-        await twitch.set_user_authentication(access_token, USER_SCOPE, refresh_token)
-    else:
-        # Need to authenticate
-        auth = UserAuthenticator(twitch, USER_SCOPE)
-        try:
-            access_token, refresh_token = await auth.authenticate()
+    # Skip app authentication and use our own tokens directly
+    twitch.auto_refresh_auth = True  # Enable auto refresh to keep the token valid
 
-            # Save tokens for future use
-            with open(TOKEN_FILE, 'w') as f:
-                json.dump({
-                    'access_token': access_token,
-                    'refresh_token': refresh_token,
-                    'expires_at': (datetime.now() + timedelta(hours=4)).timestamp()  # Approximate expiration
-                }, f)
-        except Exception as e:
-            logger.error(f"Authentication failed: {str(e)}")
-            return
+    # Set the authentication directly with the tokens
+    await twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
 
     # Verify authentication worked
     try:
-        # Fix: Use first() helper with get_users() to properly handle the async generator
         user = await first(twitch.get_users())
         if user:
             logger.info(f"Authenticated as: {user.display_name}")
@@ -395,22 +408,6 @@ async def main():
     # Register event handlers
     chat.register_event(ChatEvent.READY, on_ready)
     chat.register_event(ChatEvent.MESSAGE, on_message)
-
-    # Define a handler for the silence command
-    async def silence_command(cmd):
-        channel = cmd.room.name.lower()
-        if channel in channel_states:
-            state = channel_states[channel]
-            was_silenced = state.silence_mode
-            state.silence_mode = True
-            logger.info(f"Silence mode activated for channel {channel} via command")
-
-            # Send a message that the bot will be silent
-            if not was_silenced:  # Only send if we weren't already silenced
-                try:
-                    await chat.send_message(channel, "I'll be quiet until I'm restarted, but I'll still create clips!")
-                except Exception as e:
-                    logger.error(f"Error sending silence message to {channel}: {str(e)}")
 
     # Register the silence command
     chat.register_command('silence', silence_command)

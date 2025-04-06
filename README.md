@@ -1,31 +1,32 @@
 # GooCrewClipBot
 
-A Twitch bot that automatically creates clips when chat reactions reach a threshold. Perfect for capturing funny moments during streams without requiring manual clip creation.
+A Twitch bot that automatically creates clips when chat reactions reach a threshold.
 
 ## Features
 
-- **Automatic Clip Creation**: Creates clips when chat reactions reach a configurable threshold
-- **Reaction Monitoring**: Detects keywords like "lol", "lmao", "+2", etc. in chat messages
-- **Stream Timestamp**: Includes the stream uptime in clip titles and chat messages
-- **Silent Mode**: Option to create clips without sending messages to chat
-- **Configurable Settings**: Customize reaction keywords, thresholds, cooldown periods, and more
-- **Channel-Specific Settings**: Configure different behavior for different channels
+- Monitors multiple Twitch channels simultaneously
+- Creates clips when a threshold of reactions is detected in chat
+- Posts the clip link in chat
+- Configurable reaction keywords, thresholds, and cooldown periods
+- Silent mode option for specific channels
 
-## Requirements
+## Requirements</u>
 
-- Python 3.7+
+- Python 3.8+
 - A Twitch account for the bot
-- Twitch Developer Application credentials
+- Authentication tokens from TwitchTokenGenerator
 
 ## Installation
 
 1. Clone the repository:
+   
    ```bash
    git clone https://github.com/surplusvaluetheory/GooCrewClipBot.git
    cd GooCrewClipBot
    ```
 
 2. Create a virtual environment and install dependencies:
+   
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -33,86 +34,72 @@ A Twitch bot that automatically creates clips when chat reactions reach a thresh
    ```
 
 3. Create a `.env` file with your configuration or rename `sample.env` to `.env`:
+   
    ```
-   TWITCH_CLIENT_ID=your_client_id
-   TWITCH_CLIENT_SECRET=your_client_secret
-   TWITCH_CHANNELS=channel1,channel2
-   SILENT_CHANNELS=channel3,channel4
-   REACTION_KEYWORDS=lol,lmao,+2,lmfao,haha,rofl
+   # TwitchTokenGenerator credentials
+   TWITCH_CLIENT_ID=your_client_id_from_twitchtokengenerator
+   TWITCH_CLIENT_SECRET=your_client_secret_from_twitchtokengenerator
+   TWITCH_ACCESS_TOKEN=your_access_token_from_twitchtokengenerator
+   TWITCH_REFRESH_TOKEN=your_refresh_token_from_twitchtokengenerator
+   
+   # Bot configuration
+   TWITCH_CHANNELS=channel1,channel2,channel3
+   SILENT_CHANNELS=channel4,channel5
+   REACTION_KEYWORDS=lol,lmao,+2,lmfao,haha,rofl,lul,kekw
    REACTION_WINDOW=30
    REACTION_THRESHOLD=10
    COOLDOWN_PERIOD=120
+   
    ```
 
-## Twitch Setup
+4. Run the bot:
+   ```bash
+   python GooCrewClipBot.py
+   ```
 
-1. Create a Twitch Developer Application at [dev.twitch.tv](https://dev.twitch.tv/console/apps)
-  
-2. Note your Client ID and Client Secret
-  
-3. Generate tokens using Twitch Token Generator:
-  
-     - Visit [Twitch Token Generator](https://twitchtokengenerator.com/) - Select "Custom Scope Token"
-    
-     - Select the following scopes:
-    
-          - `chat:read`
-    
-          - `chat:edit`
-    
-          - `clips:edit`
-    
-          - `channel:read:subscriptions`
-    
-     - Generate the token
-    
-     - Copy the Access Token and Refresh Token
-    
-4. Create a file named `twitch_tokens.json` with the following structure:
-  
-```JSON
-{
-    "access_token": "your_access_token",
-    "refresh_token": "your_refresh_token",
-    "expires_at": 1743926400.0
-}
-```
-  
+## Authentication with TwitchTokenGenerator
 
-Note: The `expires_at` value should be a timestamp in the future (the example is for approximately 1 month from now)
-
-5. Add your Client ID and Client Secret to your `.env` file
+1. This bot uses TwitchTokenGenerator for authentication:
+   
+   1. Visit [Twitch Token Generator](https://twitchtokengenerator.com/)
+   2. Select "Custom Scope Token"
+   3. Select the following scopes:
+      - `chat:read`
+      - `chat:edit`
+      - `clips:edit`
+      - `channel:read:subscriptions`
+   4. Generate the token
+   5. Copy the following information:
+      - Client ID (shown at the top of the page)
+      - Client Secret (also shown at the top)
+      - Access Token
+      - Refresh Token
+   6. Add these to your `.env` file
 
 ## Configuration Options
 
-| Environment Variable | Description | Default |
-| --- | --- | --- |
-| `TWITCH_CLIENT_ID` | Your Twitch application client ID | Required |
-| `TWITCH_CLIENT_SECRET` | Your Twitch application client secret | Required |
-| `TWITCH_CHANNELS` | Comma-separated list of channels to monitor | Required |
-| `SILENT_CHANNELS` | Channels where clips are created but no messages are sent | Empty |
-| `REACTION_KEYWORDS` | Keywords that count as reactions | lol,lmao,+2,lmfao |
-| `REACTION_WINDOW` | Time window (in seconds) to count reactions | 30  |
-| `REACTION_THRESHOLD` | Number of reactions needed to trigger a clip | 10  |
-| `COOLDOWN_PERIOD` | Minimum time (in seconds) between clips | 120 |
+- `TWITCH_CHANNELS`: Comma-separated list of channels to monitor and post in
+- `SILENT_CHANNELS`: Comma-separated list of channels to monitor but not post in
+- `REACTION_KEYWORDS`: Comma-separated list of keywords that count as reactions
+- `REACTION_WINDOW`: Time window in seconds to count reactions
+- `REACTION_THRESHOLD`: Number of reactions needed to trigger a clip
+- `COOLDOWN_PERIOD`: Minimum time in seconds between clips for each channel
 
 ## Usage
 
-1. Run the bot:
-  
-  ```Bash
-  python GooCrewClipBot.py
-  ```
-2. The bot will use the tokens from your `twitch_tokens.json` file to authenticate.
-  
-3. The bot will join the specified channels and start monitoring chat for reactions.
-  
-4. When enough reactions are detected within the time window, the bot will create a clip and share the link in chat (unless the channel is in silent mode).
-  
+The bot will automatically join the specified channels and monitor chat for reaction keywords. When the threshold of reactions is reached within the specified time window, it will create a clip and share the link in chat.
 
 ## Commands
 
 - `!silence` - Silences the bot in the current channel until restart (can only be used by the channel owner or moderators)
+
+## Token Expiration
+
+The bot will check and display token expiration information when it starts. Twitch access tokens typically expire after a few hours, but the bot will automatically refresh them using the refresh token.
+
+## Logging
+
+The bot logs all activity to both the console and a file named `goocrew_clipbot.log`.
 
 ## How It Works
 
@@ -131,14 +118,6 @@ For 24/7 operation, consider running the bot on a server or using a service like
 - Heroku or similar PaaS
 
 You can use tools like `systemd`, `supervisor`, or `pm2` to keep the bot running and restart it if it crashes.
-
-## Troubleshooting
-
-- **Authentication Issues**: If your tokens expire, you can either:
-- Delete the `twitch_tokens.json` file and let the bot authenticate through the browser
-- Generate new tokens using Twitch Token Generator and update your `twitch_tokens.json` file
-- **Rate Limiting**: If you're monitoring many channels, you might hit Twitch API rate limits. Consider increasing cooldown periods.
-- **Clip Creation Failures**: Ensure the bot account has proper permissions. Some channels may have clip creation restricted.
 
 ## License
 
