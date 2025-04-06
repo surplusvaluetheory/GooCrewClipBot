@@ -384,8 +384,17 @@ async def main():
     # Initialize Twitch API with client ID and secret
     twitch = await Twitch(APP_ID, APP_SECRET)
 
-    # Skip app authentication and use our own tokens directly
-    twitch.auto_refresh_auth = True  # Enable auto refresh to keep the token valid
+    # Define a token refresh callback
+    async def token_refresh_callback(token, refresh_token):
+        logger.info(f"Token refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        # Optionally update the .env file with the new tokens
+        # This is useful if you want to persist the new tokens
+
+    # Set the token refresh callback
+    twitch.token_refresh_callback = token_refresh_callback
+
+    # Enable auto refresh to keep the token valid
+    twitch.auto_refresh_auth = True
 
     # Set the authentication directly with the tokens
     await twitch.set_user_authentication(ACCESS_TOKEN, USER_SCOPE, REFRESH_TOKEN)
