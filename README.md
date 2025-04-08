@@ -37,8 +37,8 @@ A Twitch bot that automatically creates clips when chat reactions reach a thresh
    
    ```
    # TwitchTokenGenerator credentials
-   TWITCH_CLIENT_ID=your_client_id_from_twitchtokengenerator
-   TWITCH_CLIENT_SECRET=your_client_secret_from_twitchtokengenerator
+   TWITCH_CLIENT_ID=your_client_id_from_twitch_application
+   TWITCH_CLIENT_SECRET=your_client_secret_from_twitch_application
    TWITCH_ACCESS_TOKEN=your_access_token_from_twitchtokengenerator
    TWITCH_REFRESH_TOKEN=your_refresh_token_from_twitchtokengenerator
    
