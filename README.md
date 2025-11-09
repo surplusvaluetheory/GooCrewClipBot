@@ -52,9 +52,9 @@ A Twitch bot that automatically creates clips when chat reactions reach a thresh
    TWITCH_CHANNELS=channel1,channel2,channel3
    SILENT_CHANNELS=channel4,channel5
    REACTION_KEYWORDS=lol,lmao,+2,lmfao,haha,rofl,lul,kekw,o7
-   REACTION_WINDOW=20   #in seconds
+   REACTION_WINDOW=20   # in seconds
    REACTION_THRESHOLD=4
-   COOLDOWN_PERIOD=90   #in seconds
+   COOLDOWN_PERIOD=90   # in seconds
    ```
 
 4. Run the bot:
@@ -156,5 +156,6 @@ MIT License
 ---
 
 Feel free to contribute to this project by submitting issues or pull requests!
+
 
 
