@@ -18,6 +18,12 @@ A Twitch bot that automatically creates clips when chat reactions reach a thresh
 
 ## Installation
 
+(Optional) Install python-is-python3
+
+   ```base
+   sudo apt install python-is-python3
+   ```
+
 1. Clone the repository:
    
    ```bash
@@ -145,8 +151,9 @@ MIT License
 - Built with [twitchAPI](https://github.com/Teekeks/pyTwitchAPI)
 - Inspired by [libtron](https://twitch.tv/libtron) and the rest of the [Goo Crew community](https://www.twitch.tv/team/goocrew)
 - Vibe coded with modified Claude 3.7 Sonnet model
-- running on a Raspberry Pi 5 Model B Rev 1.0 8GB
+- running on a Raspberry Pi 5 Model B Rev 1.0 8GB or a Digital Ocean Ubuntu 24.04 (LTS) x64 Droplet 512MB / 1 CPU
 
 ---
 
 Feel free to contribute to this project by submitting issues or pull requests!
+
