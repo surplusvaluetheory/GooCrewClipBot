@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import asyncio
 import json
 import aiohttp
+import csv
+from rapidfuzz import process, fuzz
 from twitchAPI.twitch import Twitch
 # Updated imports for newer twitchAPI versions
 from twitchAPI.type import AuthScope, ChatEvent
@@ -61,6 +63,43 @@ REACTION_WINDOW = int(os.getenv('REACTION_WINDOW', '30'))  # seconds to count re
 REACTION_THRESHOLD = int(os.getenv('REACTION_THRESHOLD', '10'))  # number of reactions needed to trigger a clip
 COOLDOWN_PERIOD = int(os.getenv('COOLDOWN_PERIOD', '120'))  # seconds between clips to avoid spam
 CLIP_DELAY = 5  # seconds to wait before creating a clip after threshold is reached
+
+# Load settlements database
+settlements = []
+
+def load_settlements():
+    """Load settlement data from CSV file"""
+    global settlements
+    try:
+        with open('database.csv', 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            settlements = [{'label': row['settlementLabel'], 'link': row['wikiLink']} for row in reader]
+        logger.info(f"✅ CSV loaded with {len(settlements)} settlements")
+    except Exception as e:
+        logger.error(f"Failed to load settlements database: {str(e)}")
+
+# Load the database on startup
+load_settlements()
+
+def search_village(query):
+    """Search for a village using fuzzy matching"""
+    if not settlements:
+        return None
+
+    # Extract just the labels for searching
+    labels = [s['label'] for s in settlements]
+
+    # Use fuzzy matching to find best match
+    result = process.extractOne(query, labels, scorer=fuzz.WRatio, score_cutoff=50)
+
+    if result:
+        matched_label, score, _ = result
+        # Find the full settlement data
+        for settlement in settlements:
+            if settlement['label'] == matched_label:
+                return settlement
+
+    return None
 
 # Channel-specific reaction tracking
 class ChannelState:
@@ -396,6 +435,32 @@ async def on_message(msg: ChatMessage):
                                 await chat.send_message(channel, "I'll be quiet until I'm restarted, but I'll still create clips!")
                             except Exception as e:
                                 logger.error(f"Error sending silence message to {channel}: {str(e)}")
+                    return
+
+                # Check for !village command
+                if msg.text.lower().startswith("!village "):
+                    village_query = msg.text[9:].strip()  # Remove "!village " prefix
+
+                    if not village_query:
+                        if not channel_states[channel_lower].silence_mode:
+                            await chat.send_message(channel, f"@{msg.user.name} Please specify a village name.")
+                        return
+
+                    # Search for the village
+                    result = search_village(village_query)
+
+                    if result:
+                        response = f"@{msg.user.name} {result['label']}: {result['link']}"
+                    else:
+                        response = f"@{msg.user.name} Place not found."
+
+                    # Send response (unless in silence mode)
+                    if not channel_states[channel_lower].silence_mode:
+                        try:
+                            await chat.send_message(channel, response)
+                            logger.info(f"Village lookup in {channel}: '{village_query}' -> {result['label'] if result else 'Not found'}")
+                        except Exception as e:
+                            logger.error(f"Error sending village response to {channel}: {str(e)}")
                     return
 
                 # Check if message contains any reaction keywords

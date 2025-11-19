@@ -4,3 +4,4 @@ aiohttp
 websockets
 requests
 asyncio
+rapidfuzz
